@@ -2,9 +2,10 @@
 #include <myPushButton.h>
 #include <ESP8266HTTPClient.h>
 #include <TaskScheduler.h>
+#include <TimeLib.h>
 
 
-char versionText[] = "MotionMQTTWidget v0.9";
+char versionText[] = "MotionMQTTWidget v1.1";
 
 #define 	WIFI_HOSTNAME   "LiamRoomDoorPIR"
 
@@ -17,10 +18,13 @@ char versionText[] = "MotionMQTTWidget v0.9";
 
 #define     MQTT_FEED_HHmm  "/dev/HHmm"
 
+#define     PIR_OFFLINE_PERIOD  5000 //10 * 60 * 1000  // ten minutes
+
 #define 	PIR_PIN    		D0
 #define		PULL_UP     	true
 
 bool pirEnabled = true;
+bool debug = true;
 
 /*---------------------------------------------------------------------*/
 
@@ -33,7 +37,6 @@ int status = WL_IDLE_STATUS;
 Scheduler runner;
 
 #define RUN_ONCE 2
-#define PIR_OFFLINE_PERIOD  10 * 60 * 1000  // ten minutes
 
 void pirOfflinePeriodCallback();
 
@@ -86,18 +89,27 @@ char timeStr[5];
 int time_hour = 0;
 int time_minute = 0;
 
+time_t tm;
+
 void devtime_mqttcallback(byte* payload, unsigned int length) {
 
     if (payload[0] == '-') {
         time_hour = -1;
     } else {
+
+        int hour = (payload[0] - '0') * 10;
+        hour += (payload[1] - '0');
+        int minute = (payload[3] - '0') * 10;
+        minute += (payload[4] - '0');
+
+        setTime(hour, minute, 0, 0, 0, 0);    // h, m, s, days, mnths, years
+
         timeStr[0] = payload[0];
         timeStr[1] = payload[1];
         timeStr[2] = payload[2];
         timeStr[3] = payload[3];
         timeStr[4] = payload[4];
     }
-
 }
 
 /*---------------------------------------------------------------------*/
@@ -135,13 +147,19 @@ void ubidotOldValues() {
 }
 
 void ubidotSendVariable() {
-    String body = "{ \"value\": 1.2, \"context\":{ \"message\":\"";
-    body += timeStr[0];
-    body += timeStr[1];
-    body += timeStr[2];
-    body += timeStr[3];
-    body += timeStr[4];
-    body += "\" } }";
-    wifiHelper.sendValueToUbidots(UBIDOT_DEVICE, UBIDOT_LIAMROOMDOOR_ID, UBIDOT_TOKEN, body);
+
+        char digits[4];
+        String body = "{ \"value\": 1.2, \"context\":{ \"message\":\"";
+
+        body += itoa(hour(), digits, 10);
+        body += ':';
+        body += itoa(minute(), digits, 10);   
+        body += "\" } }";
+
+            Serial.println(body);
+
+    if ((hour() <= 6 && hour() >= 21) || debug) {
+        wifiHelper.sendValueToUbidots(UBIDOT_DEVICE, UBIDOT_LIAMROOMDOOR_ID, UBIDOT_TOKEN, body);
+    }
 }
 /*---------------------------------------------------------------------*/
