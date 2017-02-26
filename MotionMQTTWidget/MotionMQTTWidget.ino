@@ -3,6 +3,7 @@
 #include <ESP8266HTTPClient.h>
 #include <TaskScheduler.h>
 #include <TimeLib.h>
+#include <myUbidotVariable.h>
 
 
 char versionText[] = "MotionMQTTWidget v1.1";
@@ -16,19 +17,23 @@ char versionText[] = "MotionMQTTWidget v1.1";
 #define     UBIDOT_LIAMROOMDOOR_ID  "58abde8c76254260e42f1632"
 #define     UBIDOT_TOKEN            "GioE85MkDexLpsbE1Tt37F3TY2p3Fa6XM4bKvftz9OfC87MrH5bQGceJrVgF"
 
-#define     MQTT_FEED_HHmm  "/dev/HHmm"
+#define     MQTT_FEED_TIMESTAMP "/dev/timestamp"
 
-#define     PIR_OFFLINE_PERIOD  5000 //10 * 60 * 1000  // ten minutes
+#define     PIR_OFFLINE_PERIOD  10 * 60 * 1000  // ten minutes
 
 #define 	PIR_PIN    		D0
+#define     PIR_TRIGGER_LED D4
 #define		PULL_UP     	true
 
-bool pirEnabled = true;
-bool debug = true;
+bool        pirEnabled = true;
+
+bool        DEBUG = false;
 
 /*---------------------------------------------------------------------*/
 
 MyWifiHelper wifiHelper(WIFI_HOSTNAME);
+
+MyUbidotVariable motion(wifiHelper.client, UBIDOT_LIAMROOMDOOR_ID, UBIDOT_TOKEN);
 
 int status = WL_IDLE_STATUS;
 
@@ -39,18 +44,41 @@ Scheduler runner;
 #define RUN_ONCE 2
 
 void pirOfflinePeriodCallback();
+void tCallback_FlashTriggerLED();
 
-Task tPirOfflinePeriod(PIR_OFFLINE_PERIOD, RUN_ONCE, &pirOfflinePeriodCallback, &runner, false);
+Task tPirOfflinePeriod(DEBUG == false 
+                        ? PIR_OFFLINE_PERIOD 
+                        : 5000, 
+                       RUN_ONCE, 
+                       &pirOfflinePeriodCallback, 
+                       &runner, 
+                       false);
+Task tFlashTriggerLED(200, 
+                      RUN_ONCE, 
+                      &tCallback_FlashTriggerLED, 
+                      &runner, 
+                      false);
 
 void pirOfflinePeriodCallback() {
 
     if (tPirOfflinePeriod.isFirstIteration()) {
         pirEnabled = false;
         Serial.println("PIR Disabled");
+        tFlashTriggerLED.restart();
     }
     else if (tPirOfflinePeriod.isLastIteration()) {
         pirEnabled = true;
         Serial.println("PIR Enabled");
+    }
+}
+
+void tCallback_FlashTriggerLED() {
+    if (tFlashTriggerLED.isFirstIteration()) {
+        pinMode(PIR_TRIGGER_LED, OUTPUT);
+        digitalWrite(PIR_TRIGGER_LED, LOW);
+    } else if (tFlashTriggerLED.isLastIteration()) {
+        pinMode(PIR_TRIGGER_LED, OUTPUT);
+        digitalWrite(PIR_TRIGGER_LED, HIGH);
     }
 }
 
@@ -85,31 +113,9 @@ void listener_PIR(int eventCode, int eventParams) {
 }
 /* ----------------------------------------------------------- */
 
-char timeStr[5];
-int time_hour = 0;
-int time_minute = 0;
-
-time_t tm;
-
-void devtime_mqttcallback(byte* payload, unsigned int length) {
-
-    if (payload[0] == '-') {
-        time_hour = -1;
-    } else {
-
-        int hour = (payload[0] - '0') * 10;
-        hour += (payload[1] - '0');
-        int minute = (payload[3] - '0') * 10;
-        minute += (payload[4] - '0');
-
-        setTime(hour, minute, 0, 0, 0, 0);    // h, m, s, days, mnths, years
-
-        timeStr[0] = payload[0];
-        timeStr[1] = payload[1];
-        timeStr[2] = payload[2];
-        timeStr[3] = payload[3];
-        timeStr[4] = payload[4];
-    }
+void mqttTimestampCallback(byte* payload, unsigned int length) {
+    unsigned long pctime = strtoul((char*)payload, NULL, 10);
+    setTime(pctime);
 }
 
 /*---------------------------------------------------------------------*/
@@ -124,9 +130,10 @@ void setup() {
     wifiHelper.setupOTA(WIFI_HOSTNAME);
 
     wifiHelper.setupMqtt();
-    wifiHelper.mqttAddSubscription(MQTT_FEED_HHmm, devtime_mqttcallback);
+    wifiHelper.mqttAddSubscription(MQTT_FEED_TIMESTAMP, mqttTimestampCallback);
 
     runner.addTask(tPirOfflinePeriod);
+    runner.addTask(tFlashTriggerLED);
 }
 
 void loop() {
@@ -142,24 +149,30 @@ void loop() {
     delay(10);
 }
 
-void ubidotOldValues() {
+void ubidotDeleteValuesForLast24Hours() {
 
+    //#define DELETE_WINDOW     24 * 60 * 60
+    #define DELETE_WINDOW     1 * 60 * 60
+    unsigned long start = now() - DELETE_WINDOW;
+    unsigned long end = now();
+    motion.ubidotsDeleteValues(start, end);
 }
 
 void ubidotSendVariable() {
 
-        char digits[4];
-        String body = "{ \"value\": 1.2, \"context\":{ \"message\":\"";
-
-        body += itoa(hour(), digits, 10);
-        body += ':';
-        body += itoa(minute(), digits, 10);   
-        body += "\" } }";
-
-            Serial.println(body);
-
-    if ((hour() <= 6 && hour() >= 21) || debug) {
-        wifiHelper.sendValueToUbidots(UBIDOT_DEVICE, UBIDOT_LIAMROOMDOOR_ID, UBIDOT_TOKEN, body);
+    // exit if our of hours
+    if (hour() >= 6 && hour() < 21 && DEBUG == false) {
+        return;
     }
+
+    char digits[4];
+    String body = "{ \"value\": 1.2, \"context\":{ \"message\":\"";
+
+    body += itoa(hour(), digits, 10);
+    body += ':';
+    body += itoa(minute(), digits, 10);   
+    body += "\" } }";
+
+    motion.sendValue(body);
 }
 /*---------------------------------------------------------------------*/
