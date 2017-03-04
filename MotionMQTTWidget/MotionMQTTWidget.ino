@@ -17,6 +17,9 @@ char versionText[] = "MotionMQTTWidget v1.1";
 #define     UBIDOT_LIAMROOMDOOR_ID  "58abde8c76254260e42f1632"
 #define     UBIDOT_TOKEN            "GioE85MkDexLpsbE1Tt37F3TY2p3Fa6XM4bKvftz9OfC87MrH5bQGceJrVgF"
 
+#define     SEND_WINDOW_START_HOUR  20
+#define     SEND_WINDOW_END_HOUR    6
+
 #define     MQTT_FEED_TIMESTAMP "/dev/timestamp"
 
 #define     PIR_OFFLINE_PERIOD  10 * 60 * 1000  // ten minutes
@@ -41,21 +44,25 @@ int status = WL_IDLE_STATUS;
 
 Scheduler runner;
 
-#define RUN_ONCE 2
+#define RUN_ONCE    2
+#define RUN_TWICE   4
 
 void pirOfflinePeriodCallback();
-void tCallback_FlashTriggerLED();
+void tCallback_FlashTriggerLEDON();
+void tCallback_FlashTriggerLEDOFF();
 
 Task tPirOfflinePeriod(DEBUG == false 
                         ? PIR_OFFLINE_PERIOD 
                         : 5000, 
-                       RUN_ONCE, 
+                       RUN_ONCE,
                        &pirOfflinePeriodCallback, 
                        &runner, 
                        false);
-Task tFlashTriggerLED(200, 
-                      RUN_ONCE, 
-                      &tCallback_FlashTriggerLED, 
+Task tFlashTriggerLED(70, 
+                      DEBUG == false
+                        ? RUN_ONCE
+                        : RUN_TWICE, 
+                      &tCallback_FlashTriggerLEDON, 
                       &runner, 
                       false);
 
@@ -72,15 +79,27 @@ void pirOfflinePeriodCallback() {
     }
 }
 
-void tCallback_FlashTriggerLED() {
-    if (tFlashTriggerLED.isFirstIteration()) {
-        pinMode(PIR_TRIGGER_LED, OUTPUT);
-        digitalWrite(PIR_TRIGGER_LED, LOW);
-    } else if (tFlashTriggerLED.isLastIteration()) {
-        pinMode(PIR_TRIGGER_LED, OUTPUT);
-        digitalWrite(PIR_TRIGGER_LED, HIGH);
-    }
+void tCallback_FlashTriggerLEDON() {
+    pinMode(PIR_TRIGGER_LED, OUTPUT);
+    digitalWrite(PIR_TRIGGER_LED, LOW);
+    tFlashTriggerLED.setCallback(tCallback_FlashTriggerLEDOFF);
 }
+
+void tCallback_FlashTriggerLEDOFF() {
+    pinMode(PIR_TRIGGER_LED, OUTPUT);
+    digitalWrite(PIR_TRIGGER_LED, HIGH);
+    tFlashTriggerLED.setCallback(tCallback_FlashTriggerLEDON);
+}
+
+// void tCallback_FlashTriggerLED() {
+//     if (tFlashTriggerLED.isFirstIteration()) {
+//         pinMode(PIR_TRIGGER_LED, OUTPUT);
+//         digitalWrite(PIR_TRIGGER_LED, LOW);
+//     } else if (tFlashTriggerLED.isLastIteration()) {
+//         pinMode(PIR_TRIGGER_LED, OUTPUT);
+//         digitalWrite(PIR_TRIGGER_LED, HIGH);
+//     }
+// }
 
 /*---------------------------------------------------------------------*/
 
@@ -104,6 +123,7 @@ void listener_PIR(int eventCode, int eventParams) {
             wifiHelper.mqttPublish(TOPIC_LIAMROOMDOOR_PIR, "1");
 
             ubidotSendVariable();
+            //ubidotDeleteValuesForLast24Hours();
 
 			break;
 
@@ -138,30 +158,45 @@ void setup() {
 
 void loop() {
 
+    serviceCallback();
+
     wifiHelper.loopMqtt();
 
     ArduinoOTA.handle();
 
     pir.serviceEvents();
 
-    runner.execute();
-
     delay(10);
+}
+
+/*---------------------------------------------------------------------*/
+
+void serviceCallback() {
+
+    runner.execute();
 }
 
 void ubidotDeleteValuesForLast24Hours() {
 
     //#define DELETE_WINDOW     24 * 60 * 60
-    #define DELETE_WINDOW     1 * 60 * 60
+    #define ONE_MINUTE            60 * 1000
+    #define ONE_HOUR              60 * ONE_MINUTE
+    #define DELETE_WINDOW     1 * ONE_HOUR
     unsigned long start = now() - DELETE_WINDOW;
-    unsigned long end = now();
+    unsigned long end = now()-(10 * 1000);
     motion.ubidotsDeleteValues(start, end);
 }
 
 void ubidotSendVariable() {
 
+    while (tFlashTriggerLED.isEnabled()) {
+        runner.execute();
+    }
+
     // exit if our of hours
-    if (hour() >= 6 && hour() < 21 && DEBUG == false) {
+    if (hour() < SEND_WINDOW_START_HOUR && 
+        hour() >= SEND_WINDOW_END_HOUR && 
+        DEBUG == false) {
         return;
     }
 
@@ -173,6 +208,6 @@ void ubidotSendVariable() {
     body += itoa(minute(), digits, 10);   
     body += "\" } }";
 
-    motion.sendValue(body);
+    motion.sendValue(body, serviceCallback);
 }
 /*---------------------------------------------------------------------*/
