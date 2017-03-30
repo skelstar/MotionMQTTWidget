@@ -1,44 +1,80 @@
 #include <myWifiHelper.h>
 #include <myPushButton.h>
-#include <ESP8266HTTPClient.h>
 #include <TaskScheduler.h>
 #include <TimeLib.h>
 #include <myUbidotVariable.h>
 
 
-char versionText[] = "MotionMQTTWidget v1.1";
+char versionText[] = "MotionMQTTWidget v2.0";
 
-#define 	WIFI_HOSTNAME   "LiamRoomDoorPIR"
+#define TOPIC_TIMESTAMP     "/dev/timestamp"
 
-#define 	TOPIC_LIAMROOMDOOR_PIR	"/dev/liam-room-door-pir"
+enum SensorNameType {
+	PIR_LID,
+	PIR_BOXEND,
+	PIR_BOXEND2,
+	PIR_ROOM
+};
 
-#define     UBIDOT_DEVICE           "liam-room-door-sensor"
-#define     UBIDOT_VARIABLE         "motion"
-#define     UBIDOT_LIAMROOMDOOR_ID  "58abde8c76254260e42f1632"
-#define     UBIDOT_TOKEN            "GioE85MkDexLpsbE1Tt37F3TY2p3Fa6XM4bKvftz9OfC87MrH5bQGceJrVgF"
+// struct PirUnitType {
+// 	wifiHostName;
+// 	topicPublish;
+// 	topicOnline;
+// 	sensorName; 
+// 	pirPin;      
+// };
 
-#define     SEND_WINDOW_START_HOUR  20
-#define     SEND_WINDOW_END_HOUR    6
+// ====================================================
+#define     WIFI_HOSTNAME   "PIR_LIAMROOM_LID"
+#define     TOPIC_MOTION   "/dev/liamroom-lid-motion"
+#define     TOPIC_ONLINE    "/dev/liamroom-lid-online"
+#define     SENSOR_NAME    "LID"
+#define     PIR_PIN         D0    // ESP8266-01: 2, WEMOS D0
+SensorNameType sensor = PIR_LID;
+
+// #define     WIFI_HOSTNAME   "PIR_LIAMROOM_BOXEND"
+// #define     TOPIC_MOTION   "/dev/liamroom-boxend-motion"
+// #define     TOPIC_ONLINE    "/dev/liamroom-boxend-online"
+// #define     SENSOR_NAME    	"BOXEND"
+// #define     PIR_PIN         D0    // ESP8266-01: 2, WEMOS D0
+// SensorNameType sensor = PIR_BOXEND;
+
+// #define     WIFI_HOSTNAME   "PIR_LIAMROOM_BOXEND_2"
+// #define     TOPIC_MOTION   "/dev/liamroom-boxend2-motion"
+// #define     TOPIC_ONLINE    "/dev/liamroom-boxend2-online"
+// #define     SENSOR_NAME    	"BOXEND2"
+// #define     PIR_PIN         0    // ESP8266-01: 2, WEMOS D0
+// SensorNameType sensor = PIR_BOXEND2;
+
+// ====================================================
 
 #define     MQTT_FEED_TIMESTAMP "/dev/timestamp"
 
-#define     PIR_OFFLINE_PERIOD  10 * 60 * 1000  // ten minutes
+#define     SECONDS             1000
+#define     PIR_OFFLINE_PERIOD  10 * SECONDS  // ten seconds
 
-#define 	PIR_PIN    		D0
-#define     PIR_TRIGGER_LED D4
-#define		PULL_UP     	true
+#define     BLUE_LED         1 // pin 1 on -01
 
-bool        pirEnabled = true;
+#define     PIR_TRIGGER_LED 14
 
-bool        DEBUG = false;
+bool        pirsEnabled = true;
 
 /*---------------------------------------------------------------------*/
 
 MyWifiHelper wifiHelper(WIFI_HOSTNAME);
 
-MyUbidotVariable motion(wifiHelper.client, UBIDOT_LIAMROOMDOOR_ID, UBIDOT_TOKEN);
-
 int status = WL_IDLE_STATUS;
+
+/*---------------------------------------------------------------------*/
+
+#define     PULL_UP                 true
+#define     NO_PULL_UP              false
+#define     NORMAL_LOW              LOW
+#define     NORMAL_HIGH             HIGH
+
+void pir_callback(int eventCode, int eventParams);
+
+myPushButton pir(PIR_PIN, NO_PULL_UP, 100000, NORMAL_LOW, pir_callback);
 
 /*---------------------------------------------------------------------*/
 
@@ -47,90 +83,88 @@ Scheduler runner;
 #define RUN_ONCE    2
 #define RUN_TWICE   4
 
+void tReadPIRCallback();
 void pirOfflinePeriodCallback();
-void tCallback_FlashTriggerLEDON();
-void tCallback_FlashTriggerLEDOFF();
+// void tCallback_FlashTriggerLEDON();
+// void tCallback_FlashTriggerLEDOFF();
+void tSendMotionToMQTTCallback();
 
-Task tPirOfflinePeriod(DEBUG == false 
-                        ? PIR_OFFLINE_PERIOD 
-                        : 5000, 
-                       RUN_ONCE,
-                       &pirOfflinePeriodCallback, 
-                       &runner, 
-                       false);
-Task tFlashTriggerLED(70, 
-                      DEBUG == false
-                        ? RUN_ONCE
-                        : RUN_TWICE, 
-                      &tCallback_FlashTriggerLEDON, 
-                      &runner, 
-                      false);
-
-void pirOfflinePeriodCallback() {
-
-    if (tPirOfflinePeriod.isFirstIteration()) {
-        pirEnabled = false;
-        Serial.println("PIR Disabled");
-        tFlashTriggerLED.restart();
-    }
-    else if (tPirOfflinePeriod.isLastIteration()) {
-        pirEnabled = true;
-        Serial.println("PIR Enabled");
-    }
-}
-
-void tCallback_FlashTriggerLEDON() {
-    pinMode(PIR_TRIGGER_LED, OUTPUT);
-    digitalWrite(PIR_TRIGGER_LED, LOW);
-    tFlashTriggerLED.setCallback(tCallback_FlashTriggerLEDOFF);
-}
-
-void tCallback_FlashTriggerLEDOFF() {
-    pinMode(PIR_TRIGGER_LED, OUTPUT);
-    digitalWrite(PIR_TRIGGER_LED, HIGH);
-    tFlashTriggerLED.setCallback(tCallback_FlashTriggerLEDON);
-}
-
-// void tCallback_FlashTriggerLED() {
-//     if (tFlashTriggerLED.isFirstIteration()) {
-//         pinMode(PIR_TRIGGER_LED, OUTPUT);
-//         digitalWrite(PIR_TRIGGER_LED, LOW);
-//     } else if (tFlashTriggerLED.isLastIteration()) {
-//         pinMode(PIR_TRIGGER_LED, OUTPUT);
-//         digitalWrite(PIR_TRIGGER_LED, HIGH);
-//     }
+// Task tFlashTriggerLED(70, RUN_TWICE, &tCallback_FlashTriggerLEDON, &runner, false);
+// void tCallback_FlashTriggerLEDON() {
+// 	pinMode(PIR_TRIGGER_LED, OUTPUT);
+// 	digitalWrite(PIR_TRIGGER_LED, LOW);
+// 	tFlashTriggerLED.setCallback(tCallback_FlashTriggerLEDOFF);
+// }
+// void tCallback_FlashTriggerLEDOFF() {
+// 	pinMode(PIR_TRIGGER_LED, OUTPUT);
+// 	digitalWrite(PIR_TRIGGER_LED, HIGH);
+// 	tFlashTriggerLED.setCallback(tCallback_FlashTriggerLEDON);
 // }
 
-/*---------------------------------------------------------------------*/
 
-void listener_PIR(int eventCode, int eventParams);
+Task tPirOfflinePeriod(5000, RUN_TWICE, &pirOfflinePeriodCallback, &runner, false);
+void pirOfflinePeriodCallback() {
 
-myPushButton pir(PIR_PIN, PULL_UP, 100000, LOW, listener_PIR);
+	if (tPirOfflinePeriod.isFirstIteration()) {
+		pirsEnabled = false;
+		//Serial.println("PIR Disabled");
+		//tFlashTriggerLED.restart();
+	}
+	else if (tPirOfflinePeriod.isLastIteration()) {
+		pirsEnabled = true;
+		//Serial.println("PIR Enabled");
+	}
+}
 
-void listener_PIR(int eventCode, int eventParams) {
+void mqttcallback_Timestamp(byte* payload, unsigned int length) {
+	wifiHelper.mqttPublish(TOPIC_ONLINE, "1");
+}
 
-    if (pirEnabled == false) {
-        return;
-    }
+Task tSendMotionToMQTT(10, 1, &tSendMotionToMQTTCallback, &runner, false);
+void tSendMotionToMQTTCallback() {
+	char* topic = TOPIC_MOTION;
+	char* payload;
+	if (sensor == PIR_LID) {
+		payload = "MOTION: LID";
+	} else if (sensor == PIR_BOXEND) {
+		payload = "MOTION: BOXEND";
+	} else if (sensor == PIR_BOXEND2) {
+		payload = "MOTION: BOXEND2";
+	}
+	sendTopicToMQTT(topic, payload);
+}
+
+void sendTopicToMQTT(char* topic, char* payload) {
+	
+	wifiHelper.mqttPublish(topic, payload);
+}
+
+int oldPinVal = 0;
+
+Task tReadPIR(200, TASK_FOREVER, &tReadPIRCallback, &runner, false);
+void tReadPIRCallback() {
+	pir.serviceEvents();
+}
+
+
+void pir_callback(int eventCode, int eventParams) {
 
 	switch (eventParams) {
 
-		case pir.EV_BUTTON_PRESSED:
+		case pir.EV_BUTTON_PRESSED: {
 
-            tPirOfflinePeriod.restart();
-            runner.execute();
+			tSendMotionToMQTT.restart();
+			Serial.println("pir_callback");
 
-            wifiHelper.mqttPublish(TOPIC_LIAMROOMDOOR_PIR, "1");
-
-            ubidotSendVariable();
-            //ubidotDeleteValuesForLast24Hours();
-
+			runner.execute();
+			}
 			break;
 
-        case pir.EV_RELEASED:
-            break;
+		case pir.EV_RELEASED:{}
+			break;
 	}
 }
+
 /* ----------------------------------------------------------- */
 
 void mqttTimestampCallback(byte* payload, unsigned int length) {
@@ -142,72 +176,49 @@ void mqttTimestampCallback(byte* payload, unsigned int length) {
 
 void setup() {
 
-    Serial.begin(9600);
-    Serial.println("Booting");
+	Serial.begin(9600);
+	Serial.println("Booting");
 
-    wifiHelper.setupWifi();
+	wifiHelper.setupWifi();
 
-    wifiHelper.setupOTA(WIFI_HOSTNAME);
+	wifiHelper.setupOTA(WIFI_HOSTNAME);
 
-    wifiHelper.setupMqtt();
-    wifiHelper.mqttAddSubscription(MQTT_FEED_TIMESTAMP, mqttTimestampCallback);
+	wifiHelper.setupMqtt();
+	wifiHelper.mqttAddSubscription(TOPIC_TIMESTAMP, mqttcallback_Timestamp);
 
-    runner.addTask(tPirOfflinePeriod);
-    runner.addTask(tFlashTriggerLED);
+	runner.addTask(tPirOfflinePeriod);
+	runner.addTask(tReadPIR);
+	//runner.addTask(tFlashTriggerLED);
+	runner.addTask(tSendMotionToMQTT);
+
+	pinMode(PIR_PIN, INPUT);
+
+	tReadPIR.restart();
 }
 
 void loop() {
 
-    serviceCallback();
+	runner.execute();
 
-    wifiHelper.loopMqtt();
+	wifiHelper.loopMqtt();
 
-    ArduinoOTA.handle();
+	ArduinoOTA.handle();
 
-    pir.serviceEvents();
+	pir.serviceEvents();
+	
+	// int pinValue = digitalRead(PIR_PIN);
+	// if (pinValue != oldPinVal) {
 
-    delay(10);
+	// 	if (pinValue == 1) {
+	// 		tSendMotionToMQTT.restart();
+	// 		Serial.println("pir_callback");
+	// 	}
+	// 	runner.execute();
+
+	// 	oldPinVal = pinValue;
+	// }
+
+	delay(10);
 }
 
-/*---------------------------------------------------------------------*/
-
-void serviceCallback() {
-
-    runner.execute();
-}
-
-void ubidotDeleteValuesForLast24Hours() {
-
-    //#define DELETE_WINDOW     24 * 60 * 60
-    #define ONE_MINUTE            60 * 1000
-    #define ONE_HOUR              60 * ONE_MINUTE
-    #define DELETE_WINDOW     1 * ONE_HOUR
-    unsigned long start = now() - DELETE_WINDOW;
-    unsigned long end = now()-(10 * 1000);
-    motion.ubidotsDeleteValues(start, end);
-}
-
-void ubidotSendVariable() {
-
-    while (tFlashTriggerLED.isEnabled()) {
-        runner.execute();
-    }
-
-    // exit if our of hours
-    if (hour() < SEND_WINDOW_START_HOUR && 
-        hour() >= SEND_WINDOW_END_HOUR && 
-        DEBUG == false) {
-        return;
-    }
-
-    char digits[4];
-    String body = "{ \"value\": 1.2, \"context\":{ \"message\":\"";
-
-    body += itoa(hour(), digits, 10);
-    body += ':';
-    body += itoa(minute(), digits, 10);   
-    body += "\" } }";
-
-    motion.sendValue(body, serviceCallback);
-}
 /*---------------------------------------------------------------------*/
