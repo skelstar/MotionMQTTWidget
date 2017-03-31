@@ -3,6 +3,7 @@
 #include <TaskScheduler.h>
 #include <TimeLib.h>
 #include <myUbidotVariable.h>
+#include <Adafruit_NeoPixel.h>
 
 
 char versionText[] = "MotionMQTTWidget v2.0";
@@ -25,26 +26,22 @@ enum SensorNameType {
 // };
 
 // ====================================================
-#define     WIFI_HOSTNAME   "PIR_LIAMROOM_LID"
-#define     TOPIC_MOTION   "/dev/liamroom-lid-motion"
-#define     TOPIC_ONLINE    "/dev/liamroom-lid-online"
-#define     SENSOR_NAME    "LID"
-#define     PIR_PIN         D0    // ESP8266-01: 2, WEMOS D0
-SensorNameType sensor = PIR_LID;
-
-// #define     WIFI_HOSTNAME   "PIR_LIAMROOM_BOXEND"
-// #define     TOPIC_MOTION   "/dev/liamroom-boxend-motion"
-// #define     TOPIC_ONLINE    "/dev/liamroom-boxend-online"
-// #define     SENSOR_NAME    	"BOXEND"
+// #define     WIFI_HOSTNAME   "PIR_LIAMROOM_LID"
+// #define     TOPIC_MOTION   	"/dev/liamroom-lid-motion"
+// #define     TOPIC_ONLINE    "/dev/liamroom-lid-online"
+// #define     SENSOR_NAME    "LID"
 // #define     PIR_PIN         D0    // ESP8266-01: 2, WEMOS D0
-// SensorNameType sensor = PIR_BOXEND;
+// SensorNameType sensor = PIR_LID;
 
-// #define     WIFI_HOSTNAME   "PIR_LIAMROOM_BOXEND_2"
-// #define     TOPIC_MOTION   "/dev/liamroom-boxend2-motion"
-// #define     TOPIC_ONLINE    "/dev/liamroom-boxend2-online"
-// #define     SENSOR_NAME    	"BOXEND2"
-// #define     PIR_PIN         0    // ESP8266-01: 2, WEMOS D0
-// SensorNameType sensor = PIR_BOXEND2;
+#define     WIFI_HOSTNAME   "PIR_LIAMROOM_BOXEND"
+#define     TOPIC_MOTION   "/dev/liamroom-boxend-motion"
+#define     TOPIC_ONLINE    "/dev/liamroom-boxend-online"
+#define     SENSOR_NAME    	"BOXEND"
+#define     PIR_PIN         D0    // ESP8266-01: 2, WEMOS D0
+#define 	PIXEL_PIN		D5
+SensorNameType sensor = PIR_BOXEND;
+
+bool send_enabled = false;
 
 // ====================================================
 
@@ -73,8 +70,16 @@ int status = WL_IDLE_STATUS;
 #define     NORMAL_HIGH             HIGH
 
 void pir_callback(int eventCode, int eventParams);
-
 myPushButton pir(PIR_PIN, NO_PULL_UP, 100000, NORMAL_LOW, pir_callback);
+
+/*---------------------------------------------------------------------*/
+#define NUM_PIXELS	1
+
+Adafruit_NeoPixel pixel = Adafruit_NeoPixel(NUM_PIXELS, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
+
+uint32_t COLOUR_OFF = pixel.Color(0, 0, 0);
+uint32_t COLOUR_MOTION = pixel.Color(10, 0, 0);
+uint32_t COLOUR_READY = pixel.Color(0, 10, 0);
 
 /*---------------------------------------------------------------------*/
 
@@ -83,98 +88,65 @@ Scheduler runner;
 #define RUN_ONCE    2
 #define RUN_TWICE   4
 
-void tReadPIRCallback();
 void pirOfflinePeriodCallback();
-// void tCallback_FlashTriggerLEDON();
-// void tCallback_FlashTriggerLEDOFF();
-void tSendMotionToMQTTCallback();
 
-// Task tFlashTriggerLED(70, RUN_TWICE, &tCallback_FlashTriggerLEDON, &runner, false);
-// void tCallback_FlashTriggerLEDON() {
-// 	pinMode(PIR_TRIGGER_LED, OUTPUT);
-// 	digitalWrite(PIR_TRIGGER_LED, LOW);
-// 	tFlashTriggerLED.setCallback(tCallback_FlashTriggerLEDOFF);
-// }
-// void tCallback_FlashTriggerLEDOFF() {
-// 	pinMode(PIR_TRIGGER_LED, OUTPUT);
-// 	digitalWrite(PIR_TRIGGER_LED, HIGH);
-// 	tFlashTriggerLED.setCallback(tCallback_FlashTriggerLEDON);
-// }
-
-
-Task tPirOfflinePeriod(5000, RUN_TWICE, &pirOfflinePeriodCallback, &runner, false);
-void pirOfflinePeriodCallback() {
-
-	if (tPirOfflinePeriod.isFirstIteration()) {
-		pirsEnabled = false;
-		//Serial.println("PIR Disabled");
-		//tFlashTriggerLED.restart();
-	}
-	else if (tPirOfflinePeriod.isLastIteration()) {
-		pirsEnabled = true;
-		//Serial.println("PIR Enabled");
-	}
+void tCallback_FlashTriggerLEDON();
+void tCallback_FlashTriggerLEDOFF();
+Task tFlashMotionLED(50, RUN_ONCE, &tCallback_FlashTriggerLEDON, &runner, false);
+void tCallback_FlashTriggerLEDON() {
+    pixel.begin();
+    pixel.setPixelColor(0, COLOUR_MOTION);
+    pixel.show();
+	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDOFF);
+}
+void tCallback_FlashTriggerLEDOFF() {
+    pixel.begin();
+    pixel.setPixelColor(0, COLOUR_OFF);
+    pixel.show();
+	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDON);
 }
 
 void mqttcallback_Timestamp(byte* payload, unsigned int length) {
 	wifiHelper.mqttPublish(TOPIC_ONLINE, "1");
 }
 
-Task tSendMotionToMQTT(10, 1, &tSendMotionToMQTTCallback, &runner, false);
-void tSendMotionToMQTTCallback() {
-	char* topic = TOPIC_MOTION;
-	char* payload;
-	if (sensor == PIR_LID) {
-		payload = "MOTION: LID";
-	} else if (sensor == PIR_BOXEND) {
-		payload = "MOTION: BOXEND";
-	} else if (sensor == PIR_BOXEND2) {
-		payload = "MOTION: BOXEND2";
-	}
-	sendTopicToMQTT(topic, payload);
-}
+volatile bool checkPirNow = false;
 
-void sendTopicToMQTT(char* topic, char* payload) {
-	
-	wifiHelper.mqttPublish(topic, payload);
-}
-
-int oldPinVal = 0;
-
-Task tReadPIR(200, TASK_FOREVER, &tReadPIRCallback, &runner, false);
-void tReadPIRCallback() {
+void tServicePirCallback();
+Task tServicePir(500, TASK_FOREVER, &tServicePirCallback, false);
+void tServicePirCallback() {
 	pir.serviceEvents();
 }
 
+/*--------------------------------------------------------------*/
 
 void pir_callback(int eventCode, int eventParams) {
 
-	switch (eventParams) {
+	Serial.println("pir_callback");
 
-		case pir.EV_BUTTON_PRESSED: {
+	if (eventParams == pir.EV_BUTTON_PRESSED) {
+		tFlashMotionLED.restart();
+	}
 
-			tSendMotionToMQTT.restart();
-			Serial.println("pir_callback");
+	if (eventParams == pir.EV_BUTTON_PRESSED ||
+		eventParams == pir.ST_WAIT_FOR_HELD_TIME ||
+		eventParams == pir.EV_HELD_FOR_LONG_ENOUGH ||
+		eventParams == pir.ST_WAITING_FOR_RELEASE ||
+		eventParams == pir.EV_RELEASED) {
 
-			runner.execute();
-			}
-			break;
-
-		case pir.EV_RELEASED:{}
-			break;
+		wifiHelper.mqttPublish(TOPIC_MOTION, "1");
 	}
 }
 
 /* ----------------------------------------------------------- */
 
-void mqttTimestampCallback(byte* payload, unsigned int length) {
-    unsigned long pctime = strtoul((char*)payload, NULL, 10);
-    setTime(pctime);
-}
-
-/*---------------------------------------------------------------------*/
-
 void setup() {
+
+    pixel.begin();
+    pixel.setPixelColor(0, COLOUR_READY);
+    pixel.show();
+
+    delay(50);
 
 	Serial.begin(9600);
 	Serial.println("Booting");
@@ -186,14 +158,14 @@ void setup() {
 	wifiHelper.setupMqtt();
 	wifiHelper.mqttAddSubscription(TOPIC_TIMESTAMP, mqttcallback_Timestamp);
 
-	runner.addTask(tPirOfflinePeriod);
-	runner.addTask(tReadPIR);
-	//runner.addTask(tFlashTriggerLED);
-	runner.addTask(tSendMotionToMQTT);
+    pixel.begin();
+    pixel.setPixelColor(0, COLOUR_OFF);
+    pixel.show();
 
-	pinMode(PIR_PIN, INPUT);
+	//runner.addTask(tFlashMotionLED);
+	runner.addTask(tServicePir);
 
-	tReadPIR.restart();
+	tServicePir.restart();
 }
 
 void loop() {
@@ -204,18 +176,9 @@ void loop() {
 
 	ArduinoOTA.handle();
 
-	pir.serviceEvents();
-	
-	// int pinValue = digitalRead(PIR_PIN);
-	// if (pinValue != oldPinVal) {
-
-	// 	if (pinValue == 1) {
-	// 		tSendMotionToMQTT.restart();
-	// 		Serial.println("pir_callback");
-	// 	}
-	// 	runner.execute();
-
-	// 	oldPinVal = pinValue;
+	// if (checkPirNow) {
+	// 	pir.serviceEvents();
+	// 	checkPirNow = false;
 	// }
 
 	delay(10);
