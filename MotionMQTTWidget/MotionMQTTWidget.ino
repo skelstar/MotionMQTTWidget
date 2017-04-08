@@ -1,5 +1,6 @@
 #include <myWifiHelper.h>
 #include <myPushButton.h>
+#include <ArduinoJson.h>            // https://github.com/bblanchon/ArduinoJson
 #include <TaskScheduler.h>
 #include <TimeLib.h>
 #include <myUbidotVariable.h>
@@ -8,7 +9,7 @@
 
 char versionText[] = "MotionMQTTWidget v2.0";
 
-#define TOPIC_TIMESTAMP     "/dev/timestamp"
+#define 	TOPIC_TIMESTAMP     "/dev/timestamp"
 
 enum SensorNameType {
 	PIR_LID,
@@ -34,11 +35,12 @@ enum SensorNameType {
 // SensorNameType sensor = PIR_LID;
 
 #define     WIFI_HOSTNAME   "PIR_LIAMROOM_BOXEND"
-#define     TOPIC_MOTION   "/dev/liamroom-boxend-motion"
-#define     TOPIC_ONLINE    "/dev/liamroom-boxend-online"
+#define     TOPIC_MOTION   	"/device/liamroom/motion"
+#define     TOPIC_ONLINE    "/device/liamroom/motion/online"
+#define     TOPIC_COMMAND   "/device/liamroom/motion/command"
 #define     SENSOR_NAME    	"BOXEND"
 #define     PIR_PIN         D0    // ESP8266-01: 2, WEMOS D0
-#define 	PIXEL_PIN		D5
+#define 	PIXEL_PIN		D1
 SensorNameType sensor = PIR_BOXEND;
 
 bool send_enabled = false;
@@ -79,6 +81,7 @@ Adafruit_NeoPixel pixel = Adafruit_NeoPixel(NUM_PIXELS, PIXEL_PIN, NEO_GRB + NEO
 
 uint32_t COLOUR_OFF = pixel.Color(0, 0, 0);
 uint32_t COLOUR_MOTION = pixel.Color(10, 0, 0);
+uint32_t COLOUR_TRIP_IN_PROGRESS = pixel.Color(5, 0, 0);
 uint32_t COLOUR_READY = pixel.Color(0, 10, 0);
 
 /*---------------------------------------------------------------------*/
@@ -125,7 +128,7 @@ void pir_callback(int eventCode, int eventParams) {
 	Serial.println("pir_callback");
 
 	if (eventParams == pir.EV_BUTTON_PRESSED) {
-		tFlashMotionLED.restart();
+		//tFlashMotionLED.restart();
 	}
 
 	if (eventParams == pir.EV_BUTTON_PRESSED ||
@@ -137,6 +140,40 @@ void pir_callback(int eventCode, int eventParams) {
 		wifiHelper.mqttPublish(TOPIC_MOTION, "1");
 	}
 }
+
+/*--------------------------------------------------------------*/
+
+uint32_t currentPixelColor = COLOUR_OFF;
+
+void mqttcallback_Command(byte *payload, unsigned int length) {
+
+    StaticJsonBuffer<50> jsonBuffer;
+
+    JsonObject& root = jsonBuffer.parseObject(payload);
+
+    if (!root.success()) {
+        Serial.println("parseObject() failed");
+    }
+
+    const char* command = root["command"];
+    const char* value = root["value"];
+
+    if (strcmp(command, "PIXELCOLOUR") == 0) {
+
+        const char d[2] = ",";
+        char* colors = strtok((char*)value, d);
+        char* red = colors;
+        colors = strtok(NULL, d);
+        char* grn = colors;
+        colors = strtok(NULL, d);
+        char* blu = colors;
+
+        uint32_t currentPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
+        pixel.setPixelColor(0, currentPixelColor);
+        pixel.show();
+    }
+}
+
 
 /* ----------------------------------------------------------- */
 
@@ -157,6 +194,7 @@ void setup() {
 
 	wifiHelper.setupMqtt();
 	wifiHelper.mqttAddSubscription(TOPIC_TIMESTAMP, mqttcallback_Timestamp);
+    wifiHelper.mqttAddSubscription(TOPIC_COMMAND, mqttcallback_Command);
 
     pixel.begin();
     pixel.setPixelColor(0, COLOUR_OFF);
@@ -175,11 +213,6 @@ void loop() {
 	wifiHelper.loopMqtt();
 
 	ArduinoOTA.handle();
-
-	// if (checkPirNow) {
-	// 	pir.serviceEvents();
-	// 	checkPirNow = false;
-	// }
 
 	delay(10);
 }
