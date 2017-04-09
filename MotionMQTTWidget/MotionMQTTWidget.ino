@@ -5,6 +5,7 @@
 #include <TimeLib.h>
 #include <myUbidotVariable.h>
 #include <Adafruit_NeoPixel.h>
+#include <myLedManager.h>
 
 
 char versionText[] = "MotionMQTTWidget v2.0";
@@ -63,6 +64,8 @@ bool        pirsEnabled = true;
 MyWifiHelper wifiHelper(WIFI_HOSTNAME);
 
 int status = WL_IDLE_STATUS;
+
+myLedManager ledManager(1);
 
 /*---------------------------------------------------------------------*/
 
@@ -131,7 +134,6 @@ void pir_callback(int eventCode, int eventParams) {
 	Serial.println("pir_callback");
 
 	if (eventParams == pir.EV_BUTTON_PRESSED) {
-		//tFlashMotionLED.restart();
 	}
 
 	if (eventParams == pir.EV_BUTTON_PRESSED) {
@@ -190,7 +192,9 @@ void mqttcallback_Command(byte *payload, unsigned int length) {
         // Serial.println(atoi(blu));
         currentPixelColor = pixel.getPixelColor(0);
         flashPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
-        tFlashMotionLED.restart();
+
+        ledManager.flash(pixel, flashPixelColor, 50, 1);
+        //tFlashMotionLED.restart();
     }
 }
 
@@ -229,6 +233,8 @@ void setup() {
 void loop() {
 
 	runner.execute();
+
+    ledManager.service();
 
 	wifiHelper.loopMqtt();
 
