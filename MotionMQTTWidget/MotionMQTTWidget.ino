@@ -34,7 +34,7 @@ enum SensorNameType {
 // #define     PIR_PIN         D0    // ESP8266-01: 2, WEMOS D0
 // SensorNameType sensor = PIR_LID;
 
-#define     WIFI_HOSTNAME   "PIR_LIAMROOM_BOXEND"
+#define     WIFI_HOSTNAME   "liamroom-room-motion"
 #define     TOPIC_MOTION   	"/device/liamroom/motion"
 #define     TOPIC_ONLINE    "/device/liamroom/motion/online"
 #define     TOPIC_COMMAND   "/device/liamroom/motion/command"
@@ -84,6 +84,9 @@ uint32_t COLOUR_MOTION = pixel.Color(10, 0, 0);
 uint32_t COLOUR_TRIP_IN_PROGRESS = pixel.Color(5, 0, 0);
 uint32_t COLOUR_READY = pixel.Color(0, 10, 0);
 
+volatile uint32_t currentPixelColor = COLOUR_OFF;
+volatile uint32_t flashPixelColor = COLOUR_OFF;
+
 /*---------------------------------------------------------------------*/
 
 Scheduler runner;
@@ -98,19 +101,19 @@ void tCallback_FlashTriggerLEDOFF();
 Task tFlashMotionLED(50, RUN_ONCE, &tCallback_FlashTriggerLEDON, &runner, false);
 void tCallback_FlashTriggerLEDON() {
     pixel.begin();
-    pixel.setPixelColor(0, COLOUR_MOTION);
+    pixel.setPixelColor(0, flashPixelColor);
     pixel.show();
 	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDOFF);
 }
 void tCallback_FlashTriggerLEDOFF() {
     pixel.begin();
-    pixel.setPixelColor(0, COLOUR_OFF);
+    pixel.setPixelColor(0, currentPixelColor);
     pixel.show();
 	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDON);
 }
 
 void mqttcallback_Timestamp(byte* payload, unsigned int length) {
-	wifiHelper.mqttPublish(TOPIC_ONLINE, "1");
+	wifiHelper.mqttPublish(TOPIC_ONLINE, "1", false);
 }
 
 volatile bool checkPirNow = false;
@@ -131,11 +134,7 @@ void pir_callback(int eventCode, int eventParams) {
 		//tFlashMotionLED.restart();
 	}
 
-	if (eventParams == pir.EV_BUTTON_PRESSED ||
-		eventParams == pir.ST_WAIT_FOR_HELD_TIME ||
-		eventParams == pir.EV_HELD_FOR_LONG_ENOUGH ||
-		eventParams == pir.ST_WAITING_FOR_RELEASE ||
-		eventParams == pir.EV_RELEASED) {
+	if (eventParams == pir.EV_BUTTON_PRESSED) {
 
 		wifiHelper.mqttPublish(TOPIC_MOTION, "1");
 	}
@@ -143,22 +142,39 @@ void pir_callback(int eventCode, int eventParams) {
 
 /*--------------------------------------------------------------*/
 
-uint32_t currentPixelColor = COLOUR_OFF;
-
 void mqttcallback_Command(byte *payload, unsigned int length) {
 
-    StaticJsonBuffer<50> jsonBuffer;
+    StaticJsonBuffer<100> jsonBuffer;
 
     JsonObject& root = jsonBuffer.parseObject(payload);
 
     if (!root.success()) {
-        Serial.println("parseObject() failed");
+        Serial.print("parseObject() failed: "); Serial.println((char*) payload);
+        return;
     }
 
     const char* command = root["command"];
     const char* value = root["value"];
 
-    if (strcmp(command, "PIXELCOLOUR") == 0) {
+    if (strcmp(command, "PIXEL") == 0) {
+        // neopixel version
+        const char d[2] = ",";
+        char* colors = strtok((char*)value, d);
+        char* red = colors;
+        colors = strtok(NULL, d);
+        char* grn = colors;
+        colors = strtok(NULL, d);
+        char* blu = colors;
+
+        currentPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
+        pixel.setPixelColor(0, currentPixelColor);
+        pixel.show();
+        //Serial.println("PIXEL");
+        // Serial.print(atoi(red)); Serial.print(","); 
+        // Serial.print(atoi(grn)); Serial.print(","); 
+        // Serial.println(atoi(blu)); 
+    }
+    else if (strcmp(command, "FLASH") == 0) {
 
         const char d[2] = ",";
         char* colors = strtok((char*)value, d);
@@ -168,9 +184,13 @@ void mqttcallback_Command(byte *payload, unsigned int length) {
         colors = strtok(NULL, d);
         char* blu = colors;
 
-        uint32_t currentPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
-        pixel.setPixelColor(0, currentPixelColor);
-        pixel.show();
+        //Serial.println("FLASH");
+        // Serial.print(atoi(red)); Serial.print(","); 
+        // Serial.print(atoi(grn)); Serial.print(","); 
+        // Serial.println(atoi(blu));
+        currentPixelColor = pixel.getPixelColor(0);
+        flashPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
+        tFlashMotionLED.restart();
     }
 }
 
