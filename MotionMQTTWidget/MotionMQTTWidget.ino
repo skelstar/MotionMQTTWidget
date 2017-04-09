@@ -94,26 +94,26 @@ volatile uint32_t flashPixelColor = COLOUR_OFF;
 
 Scheduler runner;
 
-#define RUN_ONCE    2
-#define RUN_TWICE   4
+// #define RUN_ONCE    2
+// #define RUN_TWICE   4
 
 void pirOfflinePeriodCallback();
 
-void tCallback_FlashTriggerLEDON();
-void tCallback_FlashTriggerLEDOFF();
-Task tFlashMotionLED(50, RUN_ONCE, &tCallback_FlashTriggerLEDON, &runner, false);
-void tCallback_FlashTriggerLEDON() {
-    pixel.begin();
-    pixel.setPixelColor(0, flashPixelColor);
-    pixel.show();
-	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDOFF);
-}
-void tCallback_FlashTriggerLEDOFF() {
-    pixel.begin();
-    pixel.setPixelColor(0, currentPixelColor);
-    pixel.show();
-	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDON);
-}
+// void tCallback_FlashTriggerLEDON();
+// void tCallback_FlashTriggerLEDOFF();
+// Task tFlashMotionLED(50, RUN_ONCE, &tCallback_FlashTriggerLEDON, &runner, false);
+// void tCallback_FlashTriggerLEDON() {
+//     pixel.begin();
+//     pixel.setPixelColor(0, flashPixelColor);
+//     pixel.show();
+// 	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDOFF);
+// }
+// void tCallback_FlashTriggerLEDOFF() {
+//     pixel.begin();
+//     pixel.setPixelColor(0, currentPixelColor);
+//     pixel.show();
+// 	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDON);
+// }
 
 void mqttcallback_Timestamp(byte* payload, unsigned int length) {
 	wifiHelper.mqttPublish(TOPIC_ONLINE, "1", false);
@@ -160,15 +160,18 @@ void mqttcallback_Command(byte *payload, unsigned int length) {
 
     if (strcmp(command, "PIXEL") == 0) {
         // neopixel version
-        const char d[2] = ",";
-        char* colors = strtok((char*)value, d);
-        char* red = colors;
-        colors = strtok(NULL, d);
-        char* grn = colors;
-        colors = strtok(NULL, d);
-        char* blu = colors;
 
-        currentPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
+        currentPixelColor = getPixelColourFromPayloadValue(value);
+
+        // const char d[2] = ",";
+        // char* colors = strtok((char*)value, d);
+        // char* red = colors;
+        // colors = strtok(NULL, d);
+        // char* grn = colors;
+        // colors = strtok(NULL, d);
+        // char* blu = colors;
+
+        // currentPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
         pixel.setPixelColor(0, currentPixelColor);
         pixel.show();
         //Serial.println("PIXEL");
@@ -178,24 +181,31 @@ void mqttcallback_Command(byte *payload, unsigned int length) {
     }
     else if (strcmp(command, "FLASH") == 0) {
 
-        const char d[2] = ",";
-        char* colors = strtok((char*)value, d);
-        char* red = colors;
-        colors = strtok(NULL, d);
-        char* grn = colors;
-        colors = strtok(NULL, d);
-        char* blu = colors;
+        // const char d[2] = ",";
+        // char* colors = strtok((char*)value, d);
+        // char* red = colors;
+        // colors = strtok(NULL, d);
+        // char* grn = colors;
+        // colors = strtok(NULL, d);
+        // char* blu = colors;
 
-        //Serial.println("FLASH");
-        // Serial.print(atoi(red)); Serial.print(","); 
-        // Serial.print(atoi(grn)); Serial.print(","); 
-        // Serial.println(atoi(blu));
-        currentPixelColor = pixel.getPixelColor(0);
-        flashPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
+        // flashPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
+        flashPixelColor = getPixelColourFromPayloadValue(value);
 
         ledManager.flash(pixel, flashPixelColor, 50, 1);
-        //tFlashMotionLED.restart();
     }
+}
+
+uint32_t getPixelColourFromPayloadValue(const char* val) {
+    const char d[2] = ",";
+    char* colors = strtok((char*)val, d);
+    char* red = colors;
+    colors = strtok(NULL, d);
+    char* grn = colors;
+    colors = strtok(NULL, d);
+    char* blu = colors;
+
+    return pixel.Color(atoi(red), atoi(grn), atoi(blu));
 }
 
 
