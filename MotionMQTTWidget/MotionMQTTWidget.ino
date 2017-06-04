@@ -94,26 +94,7 @@ volatile uint32_t flashPixelColor = COLOUR_OFF;
 
 Scheduler runner;
 
-// #define RUN_ONCE    2
-// #define RUN_TWICE   4
-
 void pirOfflinePeriodCallback();
-
-// void tCallback_FlashTriggerLEDON();
-// void tCallback_FlashTriggerLEDOFF();
-// Task tFlashMotionLED(50, RUN_ONCE, &tCallback_FlashTriggerLEDON, &runner, false);
-// void tCallback_FlashTriggerLEDON() {
-//     pixel.begin();
-//     pixel.setPixelColor(0, flashPixelColor);
-//     pixel.show();
-// 	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDOFF);
-// }
-// void tCallback_FlashTriggerLEDOFF() {
-//     pixel.begin();
-//     pixel.setPixelColor(0, currentPixelColor);
-//     pixel.show();
-// 	tFlashMotionLED.setCallback(tCallback_FlashTriggerLEDON);
-// }
 
 void mqttcallback_Timestamp(byte* payload, unsigned int length) {
 	wifiHelper.mqttPublish(TOPIC_ONLINE, "1", false);
@@ -160,43 +141,19 @@ void mqttcallback_Command(byte *payload, unsigned int length) {
 
     if (strcmp(command, "PIXEL") == 0) {
         // neopixel version
-
-        currentPixelColor = getPixelColourFromPayloadValue(value);
-
-        // const char d[2] = ",";
-        // char* colors = strtok((char*)value, d);
-        // char* red = colors;
-        // colors = strtok(NULL, d);
-        // char* grn = colors;
-        // colors = strtok(NULL, d);
-        // char* blu = colors;
-
-        // currentPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
+        currentPixelColor = getPixelColourFromCsvString(value);
         pixel.setPixelColor(0, currentPixelColor);
         pixel.show();
-        //Serial.println("PIXEL");
-        // Serial.print(atoi(red)); Serial.print(","); 
-        // Serial.print(atoi(grn)); Serial.print(","); 
-        // Serial.println(atoi(blu)); 
     }
     else if (strcmp(command, "FLASH") == 0) {
+        flashPixelColor = getPixelColourFromCsvString(value);
 
-        // const char d[2] = ",";
-        // char* colors = strtok((char*)value, d);
-        // char* red = colors;
-        // colors = strtok(NULL, d);
-        // char* grn = colors;
-        // colors = strtok(NULL, d);
-        // char* blu = colors;
-
-        // flashPixelColor = pixel.Color(atoi(red), atoi(grn), atoi(blu));
-        flashPixelColor = getPixelColourFromPayloadValue(value);
-
-        ledManager.flash(pixel, flashPixelColor, 50, 1);
+        #define     FLASH_ONCE  1
+        ledManager.flash(pixel, flashPixelColor, 50, FLASH_ONCE);
     }
 }
 
-uint32_t getPixelColourFromPayloadValue(const char* val) {
+uint32_t getPixelColourFromCsvString(const char* val) {
     const char d[2] = ",";
     char* colors = strtok((char*)val, d);
     char* red = colors;
