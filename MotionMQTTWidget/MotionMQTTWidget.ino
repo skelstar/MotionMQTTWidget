@@ -8,22 +8,25 @@
 
 char versionText[] = "MotionMQTTWidget v3.0";
 
-// #define     WIFI_HOSTNAME   	"/liamhouse/motion"
-
-// #define 	TOPIC_TIMESTAMP     "/dev/timestamp"
-// #define 	TOPIC_COMMAND		"/liamhouse/motion/command"
-// #define     TOPIC_ONLINE        "/liamhouse/motion/online"
-// #define     TOPIC_EVENT         "/liamhouse/motion/event"
-
-#define     WIFI_HOSTNAME   	"/liamsroom/motion"
+#define     WIFI_HOSTNAME   	"/liamshouse/motion"
 
 #define 	TOPIC_TIMESTAMP     "/dev/timestamp"
-#define 	TOPIC_COMMAND		"/liamsroom/motion/command"
-#define     TOPIC_ONLINE        "/liamsroom/motion/online"
-#define     TOPIC_EVENT         "/liamsroom/motion/event"
+#define 	TOPIC_COMMAND		"/liamshouse/motion/command"
+#define     TOPIC_ONLINE        "/liamshouse/motion/online"
+#define     TOPIC_EVENT         "/liamshouse/motion/event"
 
-#define     PIR_PIN         D0	// WEMOS D0, ESP 2
-#define 	PIXEL_PIN		D1	// WEMOS D1
+#define 	PIR_PIN		2
+#define 	PIXEL_PIN	0
+
+// #define     WIFI_HOSTNAME   	"/liamsroom/motion"
+
+// #define 	TOPIC_TIMESTAMP     "/dev/timestamp"
+// #define 	TOPIC_COMMAND		"/liamsroom/motion/command"
+// #define     TOPIC_ONLINE        "/liamsroom/motion/online"
+// #define     TOPIC_EVENT         "/liamsroom/motion/event"
+
+// #define     PIR_PIN         D0	// WEMOS D0, ESP 2
+// #define 	PIXEL_PIN		D1	// WEMOS D1
 
 //--------------------------------------------------------------------------------
 
